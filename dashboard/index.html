@@ -1,0 +1,282 @@
+<!-- dashboard/index.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Biofloc Tank Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+  <style>
+    body { background: #071023; }
+    button:disabled { opacity:0.45; cursor:not-allowed; }
+  </style>
+</head>
+<body class="min-h-screen text-slate-100">
+  <div class="max-w-6xl mx-auto p-6">
+    <header class="flex items-center justify-between mb-6">
+      <div>
+        <h1 class="text-3xl font-bold">Biofloc Tank Dashboard</h1>
+        <p class="text-sm text-slate-400">Live IoT monitoring (ESP32 → Firebase)</p>
+      </div>
+      <div>
+        <span id="connection-dot" class="inline-block w-3 h-3 rounded-full bg-red-500"></span>
+        <span id="connection-text" class="ml-2">Connecting…</span>
+      </div>
+    </header>
+
+    <section id="cards" class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+      <!-- Air -->
+      <div class="bg-slate-800 rounded-xl p-4">
+        <div class="flex justify-between items-center">
+          <h3 class="text-sm text-slate-300">Air</h3>
+          <span class="text-xs text-slate-500">Env</span>
+        </div>
+        <p id="airTemp" class="text-3xl font-semibold">--.-°C</p>
+        <p class="text-xs text-slate-400">Humidity: <span id="airHum">--.-%</span></p>
+      </div>
+
+      <!-- Water Temp -->
+      <div class="bg-slate-800 rounded-xl p-4">
+        <div class="flex justify-between items-center">
+          <h3 class="text-sm text-slate-300">Water Temp</h3>
+          <span class="text-xs text-slate-500">DS18B20</span>
+        </div>
+        <p id="waterTemp" class="text-3xl font-semibold">--.-°C</p>
+        <p id="waterTempStatus" class="text-xs text-slate-400">Status: --</p>
+      </div>
+
+      <!-- Water Level -->
+      <div class="bg-slate-800 rounded-xl p-4">
+        <div class="flex justify-between items-center">
+          <h3 class="text-sm text-slate-300">Water Level</h3>
+          <span class="text-xs text-slate-500">Sensor</span>
+        </div>
+        <p id="waterStatus" class="text-3xl font-semibold">--</p>
+        <p class="text-xs text-slate-400">Raw: <span id="waterRaw">--</span> | V: <span id="waterVoltage">--.-V</span></p>
+      </div>
+    </section>
+
+    <!-- Pump controls + charts -->
+    <section class="grid lg:grid-cols-3 gap-6">
+      <div class="bg-slate-800 rounded-xl p-4">
+        <div class="flex justify-between items-center mb-3">
+          <h3 class="text-sm text-slate-200">Pumps & Control</h3>
+          <span id="modeBadge" class="px-2 py-0.5 rounded-full text-xs bg-emerald-500/10 text-emerald-300">AUTO</span>
+        </div>
+
+        <div class="flex items-center gap-3 mb-3">
+          <label class="flex items-center gap-2 text-xs">
+            <span class="text-slate-400">Auto</span>
+            <input id="modeToggle" type="checkbox" class="ml-2">
+            <span class="text-slate-400">Manual</span>
+          </label>
+        </div>
+
+        <div class="grid grid-cols-2 gap-2">
+          <button id="btnPumpIn" class="rounded-xl bg-slate-700 p-3">Pump IN <span id="pumpInState" class="block text-xs mt-1">OFF</span></button>
+          <button id="btnPumpOut" class="rounded-xl bg-slate-700 p-3">Pump OUT <span id="pumpOutState" class="block text-xs mt-1">OFF</span></button>
+        </div>
+
+        <p class="text-xs text-slate-400 mt-3">Manual mode allows remote control. In Auto, pumps follow water-level logic.</p>
+      </div>
+
+      <div class="bg-slate-800 rounded-xl p-4 lg:col-span-2">
+        <div class="grid lg:grid-cols-2 gap-4">
+          <div>
+            <h4 class="text-sm text-slate-200 mb-2">Air & Water Temp</h4>
+            <canvas id="tempChart" class="h-56"></canvas>
+          </div>
+          <div>
+            <h4 class="text-sm text-slate-200 mb-2">pH & Turbidity</h4>
+            <canvas id="phTurbChart" class="h-56"></canvas>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </div>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-app.js";
+    import { getDatabase, ref, onValue, update } from "https://www.gstatic.com/firebasejs/9.23.0/firebase-database.js";
+
+    // TODO: Replace with your Firebase config
+    const firebaseConfig = {
+      apiKey: "YOUR_API_KEY",
+      authDomain: "your-app.firebaseapp.com",
+      databaseURL: "https://your-project-default-rtdb.region.firebasedatabase.app",
+      projectId: "your-project-id",
+      storageBucket: "your-project.appspot.com",
+      messagingSenderId: "xxxx",
+      appId: "xxxx"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db  = getDatabase(app);
+
+    // DOM
+    const connectionDot = document.getElementById("connection-dot");
+    const connectionText = document.getElementById("connection-text");
+
+    const airTempEl = document.getElementById("airTemp");
+    const airHumEl  = document.getElementById("airHum");
+    const waterTempEl = document.getElementById("waterTemp");
+    const waterTempStatus = document.getElementById("waterTempStatus");
+    const waterStatusEl = document.getElementById("waterStatus");
+    const waterRawEl = document.getElementById("waterRaw");
+    const waterVoltageEl = document.getElementById("waterVoltage");
+    const phValueEl = document.getElementById("phValue");
+    const phVoltageEl = document.getElementById("phVoltage");
+    const turbValueEl = document.getElementById("turbValue");
+    const turbVoltageEl = document.getElementById("turbVoltage");
+    const lastUpdateEl = document.getElementById("lastUpdate");
+    const modeBadge = document.getElementById("modeBadge");
+    const modeToggle = document.getElementById("modeToggle");
+    const btnPumpIn = document.getElementById("btnPumpIn");
+    const btnPumpOut = document.getElementById("btnPumpOut");
+    const pumpInStateSpan = document.getElementById("pumpInState");
+    const pumpOutStateSpan = document.getElementById("pumpOutState");
+
+    // Charts
+    const maxPoints = 40;
+    const labels = [];
+
+    const tempCtx = document.getElementById("tempChart").getContext("2d");
+    const phTurbCtx = document.getElementById("phTurbChart").getContext("2d");
+
+    const tempChart = new Chart(tempCtx, {
+      type: 'line',
+      data: {
+        labels: labels,
+        datasets: [
+          { label: "Air Temp (°C)", data: [], borderWidth: 2 },
+          { label: "Water Temp (°C)", data: [], borderWidth: 2 }
+        ]
+      },
+      options: { maintainAspectRatio:false }
+    });
+
+    const phTurbChart = new Chart(phTurbCtx, {
+      type: 'line',
+      data: { labels: labels, datasets: [
+          { label: "pH", data: [], borderWidth: 2 },
+          { label: "Turbidity", data: [], borderWidth: 2 }
+      ]},
+      options: { maintainAspectRatio:false }
+    });
+
+    function pushLabel() {
+      const t = new Date().toLocaleTimeString();
+      if (labels.length >= maxPoints) labels.shift();
+      labels.push(t);
+    }
+    function pushValue(chart, idx, value) {
+      if (chart.data.datasets[idx].data.length >= maxPoints) chart.data.datasets[idx].data.shift();
+      chart.data.datasets[idx].data.push(value);
+    }
+
+    const deviceRef = ref(db, "devices/esp32_1");
+
+    let latestControl = { manualMode:false, pumpIn:false, pumpOut:false };
+
+    onValue(deviceRef, snapshot => {
+      const data = snapshot.val();
+      if (!data) {
+        connectionDot.className = "inline-block w-3 h-3 rounded-full bg-yellow-400";
+        connectionText.textContent = "No data at /devices/esp32_1";
+        return;
+      }
+      connectionDot.className = "inline-block w-3 h-3 rounded-full bg-emerald-400";
+      connectionText.textContent = "Connected";
+
+      const airTemp = data.airTemp;
+      const airHum = data.airHum;
+      const waterTemp = data.waterTemp;
+      const pH = data.pH;
+      const pHVolt = data.pHVoltage;
+      const turb = data.turbidity;
+      const turbVolt = data.turbVoltage;
+      const waterPresent = data.waterPresent;
+      const waterRaw = data.waterRaw;
+      const waterVolt = data.waterVoltage;
+      const ctrl = data.control || {};
+
+      latestControl.manualMode = !!ctrl.manualMode;
+      latestControl.pumpIn = !!ctrl.pumpIn;
+      latestControl.pumpOut = !!ctrl.pumpOut;
+
+      const pumpInState = !!ctrl.pumpInState;
+      const pumpOutState = !!ctrl.pumpOutState;
+
+      if (typeof airTemp === "number") airTempEl.textContent = airTemp.toFixed(1) + "°C";
+      if (typeof airHum === "number") airHumEl.textContent = airHum.toFixed(1) + "%";
+      if (typeof waterTemp === "number") {
+        waterTempEl.textContent = waterTemp.toFixed(2) + "°C";
+        waterTempStatus.textContent = waterTemp < 20 || waterTemp > 32 ? "Status: ⚠" : "Status: OK";
+      }
+      if (typeof pH === "number") {
+        // update pH field if present (you can add pH element)
+      }
+
+      waterStatusEl.textContent = waterPresent ? "OK" : "LOW / DRY";
+      waterStatusEl.className = "text-3xl font-semibold " + (waterPresent ? "text-emerald-400" : "text-red-400");
+      if (typeof waterRaw === "number") waterRawEl.textContent = waterRaw;
+      if (typeof waterVolt === "number") waterVoltageEl.textContent = waterVolt.toFixed(3) + "V";
+
+      // control UI
+      modeToggle.checked = latestControl.manualMode;
+      modeBadge.textContent = latestControl.manualMode ? "MANUAL" : "AUTO";
+      pumpInStateSpan.textContent = pumpInState ? "ON" : "OFF";
+      pumpOutStateSpan.textContent = pumpOutState ? "ON" : "OFF";
+      btnPumpIn.disabled = !latestControl.manualMode;
+      btnPumpOut.disabled = !latestControl.manualMode;
+
+      // charts
+      pushLabel();
+      pushValue(tempChart, 0, typeof airTemp === "number" ? airTemp : null);
+      pushValue(tempChart, 1, typeof waterTemp === "number" ? waterTemp : null);
+      pushValue(phTurbChart, 0, typeof pH === "number" ? pH : null);
+      pushValue(phTurbChart, 1, typeof turb === "number" ? turb : null);
+
+      tempChart.update();
+      phTurbChart.update();
+    }, error => {
+      console.error("RTDB error:", error);
+      connectionDot.className = "inline-block w-3 h-3 rounded-full bg-red-500";
+      connectionText.textContent = "Error";
+    });
+
+    async function pushControl(obj) {
+      try {
+        await update(ref(db, "devices/esp32_1/control"), obj);
+      } catch (err) {
+        console.error("Update control failed", err);
+      }
+    }
+
+    modeToggle.addEventListener("change", () => {
+      const manual = modeToggle.checked;
+      latestControl.manualMode = manual;
+      const obj = { manualMode: manual };
+      if (!manual) { obj.pumpIn = false; obj.pumpOut = false; }
+      pushControl(obj);
+    });
+
+    btnPumpIn.addEventListener("click", () => {
+      if (!latestControl.manualMode) return;
+      latestControl.pumpIn = !latestControl.pumpIn;
+      pushControl({ pumpIn: latestControl.pumpIn, pumpOut: false });
+    });
+
+    btnPumpOut.addEventListener("click", () => {
+      if (!latestControl.manualMode) return;
+      latestControl.pumpOut = !latestControl.pumpOut;
+      pushControl({ pumpOut: latestControl.pumpOut, pumpIn: false });
+    });
+
+  </script>
+</body>
+</html>
