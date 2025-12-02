@@ -12,11 +12,9 @@
 
 ## Demo & Screenshots
 
-*(Replace `images/dashboard.png` with your screenshot)*
 
 ![dashboard](images/dashboard.png)
 
-*(Replace `images/schematic.png` with your wiring diagram)*
 
 ![schematic](images/schematic.png)
 
