@@ -1,18 +1,18 @@
-# Build and Release Folders
-bin-debug/
-bin-release/
-[Oo]bj/
-[Bb]in/
+# Arduino/PlatformIO
+*.bin
+*.elf
+*.pio
+*.build
+*.cache
+*.sass-cache
 
-# Other files and folders
-.settings/
+# Node / tooling
+node_modules/
+dist/
 
-# Executables
-*.swf
-*.air
-*.ipa
-*.apk
+# OS
+.DS_Store
+Thumbs.db
 
-# Project files, i.e. `.project`, `.actionScriptProperties` and `.flexProperties`
-# should NOT be excluded as they contain compiler settings and other important
-# information for Eclipse / Flash Builder.
+# Local sensitive files
+*.env
