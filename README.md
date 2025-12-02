@@ -16,7 +16,7 @@
 ![dashboard](images/dashboard.png)
 
 
-![schematic](images/schematic.png)
+![schematic](images/schematic.jpeg)
 
 ---
 
